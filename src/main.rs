@@ -1,8 +1,10 @@
 use std::{fs::File, io::Read};
 
+use flag::FIXED_HUFF;
+
 #[derive(Debug)]
 #[allow(dead_code)]
-struct GzipMeta {
+struct GzipMeta<'a> {
     id1: u8,
     id2: u8,
     cm: u8,
@@ -11,11 +13,12 @@ struct GzipMeta {
     xfl: u8,
     os: u8,
     filename: Option<String>,
+    cdata: &'a [u8],
 }
 
 #[allow(dead_code)]
-struct Gzip {
-    meta: GzipMeta,
+struct Gzip<'a> {
+    meta: GzipMeta<'a>,
     data: Vec<u8>,
 }
 
@@ -25,6 +28,10 @@ pub mod flag {
     pub const FEXTRA: u8 = 1 << 2;
     pub const FNAME: u8 = 1 << 3;
     pub const FCOMMENT: u8 = 1 << 4;
+
+    pub const NO_COMPRESSION: u8 = 0;
+    pub const FIXED_HUFF: u8 = 1;
+    pub const DYNAMIC_HUFF: u8 = 2;
 }
 
 #[allow(dead_code)]
@@ -38,9 +45,100 @@ fn gzip() -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-#[allow(unused)]
 fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
-    Ok(Vec::new())
+    let mut v = Vec::new();
+    let mut bs = BitStream::new(bytes);
+
+    let bfinal = bs.get_nbit(1);
+    let btype = bs.get_nbit(2);
+
+    
+    if btype as u8 == FIXED_HUFF {
+        /*
+            Lit Value   Bits    Codes
+            ---------   ----    -----
+              0 - 143     8     00110000 through
+                                10111111
+            144 - 255     9     110010000 through
+                                111111111
+            256 - 279     7     0000000 through
+                                0010111
+            280 - 287     8     11000000 through
+                                11000111
+        */
+        loop {
+            let mut a = bs.get_nbit_rev(7);
+            if a < 0b0010111 {
+                // repeat
+                if a == 0 {
+                    break;
+                }
+            } else {
+                let c = bs.get_nbit(1);
+                a = (a << 1) + c;
+                if a < 0b10111111 {
+                    let p = (a - 0b00110000 as u16) as u8;
+                    v.push(p);
+                }
+            }
+        }
+    }
+
+    Ok(v)
+}
+
+struct BitStream<'a> {
+    bytes: &'a [u8],
+    mask: u8,
+    index: usize,
+}
+
+impl<'a> BitStream<'a> {
+    fn new(bytes: &[u8]) -> BitStream {
+        BitStream {
+            bytes,
+            mask: 1,
+            index: 0,
+        }
+    }
+
+    fn get_bit(&mut self) -> u16 {
+        let mut ret = 0;
+        if (self.mask & self.bytes[self.index]) != 0 {
+            ret = 1;
+        }
+
+        if self.mask << 1 == 0 {
+            self.index += 1;
+            self.mask = 1;
+        } else {
+            self.mask <<= 1;
+        }
+
+        ret
+    }
+
+    fn get_nbit(&mut self, cnt: u16) -> u16 {
+        let mut n = 0;
+
+        for i in 0..cnt {
+            n |= self.get_bit() << i;
+        }
+
+        n
+    }
+
+    fn get_nbit_rev(&mut self, cnt: u16) -> u16 {
+        let mut n = 0;
+
+        for _ in 0..cnt {
+            n <<= 1;
+            let c = self.get_bit();
+            n |= c;
+        }
+
+        n
+    }
 }
 
 fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
@@ -81,6 +179,7 @@ fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
         }
         let s = &bytes[start..index];
         filename = Some(String::from_utf8_lossy(s).to_string());
+        index += 1;
     }
 
     if (flg & flag::FCOMMENT) != 0 {}
@@ -94,30 +193,35 @@ fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
         xfl,
         os,
         filename,
+        cdata: &bytes[index..(bytes.len() - 8)],
     })
 }
 
 fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
-    let meta = parse_gzip_meta(bytes);
-    if let Err(e) = meta {
+    let res_meta = parse_gzip_meta(bytes);
+    if let Err(e) = res_meta {
         return Err(e);
     }
 
+    let meta = res_meta.unwrap();
     println!("meta: {:?}", meta);
 
-    let data = inflate(bytes);
+    let data = inflate(meta.cdata);
+
+    println!("{:?}", data);
+
     if let Err(e) = data {
         return Err(e);
     }
 
     Ok(Gzip {
-        meta: meta.unwrap(),
+        meta,
         data: data.unwrap(),
     })
 }
 
 fn main() {
-    let file = File::open("test_files/a.gz");
+    let file = File::open("test_files/y.gz");
     let mut buf: Vec<u8> = Vec::new();
     let _ = file.unwrap().read_to_end(&mut buf);
     let result = ungzip(&buf).unwrap();
