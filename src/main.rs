@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::{str, fs::File, io::Read};
 
 use flag::FIXED_HUFF;
 
@@ -44,6 +44,32 @@ fn gzip() -> Vec<u8> {
     Vec::new()
 }
 
+fn get_len(bs: &mut BitStream, len_code: u16) -> u16 {
+    let code_table = [
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115,
+        131, 163, 195, 227, 258,
+    ];
+
+    let extra_table = [
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+    ];
+
+    code_table[len_code as usize] + bs.get_nbit_rev(extra_table[len_code as usize])
+}
+
+fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
+    let code_table = [
+        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+        2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    ];
+
+    let extra_table = [
+        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
+    ];
+
+    code_table[dis_code as usize] + bs.get_nbit_rev(extra_table[dis_code as usize])
+}
+
 #[allow(dead_code)]
 fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
     let mut v = Vec::new();
@@ -52,7 +78,10 @@ fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
     let bfinal = bs.get_nbit(1);
     let btype = bs.get_nbit(2);
 
-    
+    if bfinal != 1 {
+        todo!("not final block");
+    }
+
     if btype as u8 == FIXED_HUFF {
         /*
             Lit Value   Bits    Codes
@@ -69,14 +98,29 @@ fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
         loop {
             let mut a = bs.get_nbit_rev(7);
             if a < 0b0010111 {
-                // repeat
+                // 256-279
                 if a == 0 {
                     break;
+                } else {
+                    let len_code = a;
+                    let len = get_len(&mut bs, len_code);
+
+                    // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
+                    let dis_code = bs.get_nbit_rev(5);
+                    let dis = get_dis(&mut bs, dis_code);
+                    
+                    // copy string
+                    // Note also that the referenced string may overlap the current position
+                    let index = v.len() - dis as usize;
+                    for i in index..(index + len as usize) {
+                        v.push(v[i]);
+                    }
                 }
             } else {
                 let c = bs.get_nbit(1);
                 a = (a << 1) + c;
                 if a < 0b10111111 {
+                    // 0-143
                     let p = (a - 0b00110000 as u16) as u8;
                     v.push(p);
                 }
@@ -221,9 +265,11 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
 }
 
 fn main() {
-    let file = File::open("test_files/y.gz");
+    let file = File::open("test_files/d.gz");
     let mut buf: Vec<u8> = Vec::new();
     let _ = file.unwrap().read_to_end(&mut buf);
     let result = ungzip(&buf).unwrap();
     println!("{:?}", result.data);
+    let s = str::from_utf8(&result.data);
+    println!("{}", s.unwrap());
 }
