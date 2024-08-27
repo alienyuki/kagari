@@ -56,6 +56,7 @@ fn get_len(bs: &mut BitStream, len_code: u16) -> u16 {
 
     // The extra bits should be interpreted as a machine integer
     // stored with the most-significant bit first
+    println!("{len_code}");
     code_table[len_code as usize] + bs.get_nbit(extra_table[len_code as usize])
 }
 
@@ -72,6 +73,79 @@ fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
     code_table[dis_code as usize] + bs.get_nbit(extra_table[dis_code as usize])
 }
 
+fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
+    /*
+        Lit Value   Bits    Codes
+        ---------   ----    -----
+          0 - 143     8     00110000 through
+                            10111111
+        144 - 255     9     110010000 through
+                            111111111
+        256 - 279     7     0000000 through
+                            0010111
+        280 - 287     8     11000000 through
+                            11000111
+    */
+    loop {
+        let mut huff_key = bs.get_nbit_rev(7);
+        println!("a: {huff_key}");
+        if huff_key <= 0b0010111 {
+            // 256-279
+            if huff_key == 0 {
+                break;
+            } else {
+                let len_code = huff_key - 1;
+                let len = get_len(bs, len_code);
+
+                // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
+                let dis_code = bs.get_nbit_rev(5);
+                let dis = get_dis(bs, dis_code);
+
+                // copy string
+                // Note also that the referenced string may overlap the current position
+                let index = v.len() - dis as usize;
+                for i in index..(index + len as usize) {
+                    v.push(v[i]);
+                }
+            }
+
+            continue;
+        }
+        let c = bs.get_nbit(1);
+        huff_key = (huff_key << 1) + c;
+        if huff_key <= 0b10111111 {
+            // 0-143
+            let p = (huff_key - 0b00110000 as u16) as u8;
+            v.push(p);
+            continue;
+
+        } else if huff_key <= 0b11000111 {
+            // 280-287, the same as 256-279
+            let len_code = huff_key - 0b11000000 + 279 - 256;
+            println!("len code: {}, a: {}\n", len_code, huff_key);
+            let len = get_len(bs, len_code);
+
+            // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
+            let dis_code = bs.get_nbit_rev(5);
+            let dis = get_dis(bs, dis_code);
+
+            // copy string
+            // Note also that the referenced string may overlap the current position
+            let index = v.len() - dis as usize;
+            for i in index..(index + len as usize) {
+                v.push(v[i]);
+            }
+            continue;
+        }
+
+        // 144-255
+        let c = bs.get_nbit(1);
+        huff_key = (huff_key << 1) + c;
+        let p = (huff_key - 0b110010000 as u16) as u8;
+        v.push(p);
+    }
+}
+
 #[allow(dead_code)]
 fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
     let mut v = Vec::new();
@@ -85,49 +159,7 @@ fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
     }
 
     if btype as u8 == FIXED_HUFF {
-        /*
-            Lit Value   Bits    Codes
-            ---------   ----    -----
-              0 - 143     8     00110000 through
-                                10111111
-            144 - 255     9     110010000 through
-                                111111111
-            256 - 279     7     0000000 through
-                                0010111
-            280 - 287     8     11000000 through
-                                11000111
-        */
-        loop {
-            let mut a = bs.get_nbit_rev(7);
-            if a < 0b0010111 {
-                // 256-279
-                if a == 0 {
-                    break;
-                } else {
-                    let len_code = a - 1;
-                    let len = get_len(&mut bs, len_code);
-
-                    // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
-                    let dis_code = bs.get_nbit_rev(5);
-                    let dis = get_dis(&mut bs, dis_code);
-
-                    // copy string
-                    // Note also that the referenced string may overlap the current position
-                    let index = v.len() - dis as usize;
-                    for i in index..(index + len as usize) {
-                        v.push(v[i]);
-                    }
-                }
-            } else {
-                let c = bs.get_nbit(1);
-                a = (a << 1) + c;
-                if a < 0b10111111 {
-                    // 0-143
-                    let p = (a - 0b00110000 as u16) as u8;
-                    v.push(p);
-                }
-            }
-        }
+        inflate_fixed_huff(&mut bs, &mut v);
     }
 
     Ok(v)
@@ -267,7 +299,7 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
 }
 
 fn main() {
-    let file = File::open("test_files/c.gz");
+    let file = File::open("test_files/g.gz");
     let mut buf: Vec<u8> = Vec::new();
     let _ = file.unwrap().read_to_end(&mut buf);
     let result = ungzip(&buf).unwrap();
