@@ -54,7 +54,9 @@ fn get_len(bs: &mut BitStream, len_code: u16) -> u16 {
         0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
     ];
 
-    code_table[len_code as usize] + bs.get_nbit_rev(extra_table[len_code as usize])
+    // The extra bits should be interpreted as a machine integer
+    // stored with the most-significant bit first
+    code_table[len_code as usize] + bs.get_nbit(extra_table[len_code as usize])
 }
 
 fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
@@ -67,7 +69,7 @@ fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
         0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
     ];
 
-    code_table[dis_code as usize] + bs.get_nbit_rev(extra_table[dis_code as usize])
+    code_table[dis_code as usize] + bs.get_nbit(extra_table[dis_code as usize])
 }
 
 #[allow(dead_code)]
@@ -102,13 +104,13 @@ fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
                 if a == 0 {
                     break;
                 } else {
-                    let len_code = a;
+                    let len_code = a - 1;
                     let len = get_len(&mut bs, len_code);
 
                     // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
                     let dis_code = bs.get_nbit_rev(5);
                     let dis = get_dis(&mut bs, dis_code);
-                    
+
                     // copy string
                     // Note also that the referenced string may overlap the current position
                     let index = v.len() - dis as usize;
@@ -265,7 +267,7 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
 }
 
 fn main() {
-    let file = File::open("test_files/d.gz");
+    let file = File::open("test_files/c.gz");
     let mut buf: Vec<u8> = Vec::new();
     let _ = file.unwrap().read_to_end(&mut buf);
     let result = ungzip(&buf).unwrap();
