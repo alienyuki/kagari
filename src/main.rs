@@ -1,4 +1,4 @@
-use std::{str, fs::File, io::Read};
+use std::{fs::{self, File}, io::Read, str};
 
 use flag::FIXED_HUFF;
 
@@ -298,12 +298,61 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
     })
 }
 
+fn generate_cases() -> Vec<String> {
+    let path = "./test_files";
+    let mut v = Vec::new();
+
+    for entry in fs::read_dir(path).unwrap() {
+        let entry = entry.unwrap();
+        let filename = entry.file_name().into_string().unwrap();
+        if !filename.ends_with(".gz") {
+            v.push(filename);
+        }
+    }
+    v
+}
+
 fn main() {
-    let file = File::open("test_files/g.gz");
-    let mut buf: Vec<u8> = Vec::new();
-    let _ = file.unwrap().read_to_end(&mut buf);
-    let result = ungzip(&buf).unwrap();
-    println!("{:?}", result.data);
-    let s = str::from_utf8(&result.data);
-    println!("{}", s.unwrap());
+    let args: Vec<String> = std::env::args().collect();
+    println!("{:?}", args);
+
+    let mut res = Vec::new();
+
+    let mut cases = &args[1..args.len()];
+    let default_cases = generate_cases();
+
+    if cases.len() == 0 {
+        cases = &default_cases[0..default_cases.len()];
+    }
+
+    for arg in cases {
+        println!("{arg}");
+
+        let gz_path = format!("test_files/{}.gz", arg);
+        let mut gz_content: Vec<u8> = Vec::new();
+        let _ = File::open(&gz_path).unwrap().read_to_end(&mut gz_content);
+
+        let result = ungzip(&gz_content).unwrap();
+        println!("{:?}", result.data);
+        // let s = str::from_utf8(&result.data).unwrap();
+
+        let raw_path = format!("test_files/{}", arg);
+        let mut file_content: Vec<u8> = Vec::new();
+        let _ = File::open(&raw_path).unwrap().read_to_end(&mut file_content);
+
+        println!("aa: {:?}, {:?}", file_content, result.data);
+
+        if file_content == result.data {
+            println!("\x1b[32m{arg} pass.\x1b[0m");
+        } else {
+            println!("\x1b[1;31m{arg} error!\x1b[0m");
+            res.push(arg);
+        }
+    }
+
+    if res.len() != 0 {
+        println!("\x1b[1;31m{:?} is not passed!\x1b[0m", res);
+    } else {
+        println!("\x1b[32mAll passed!\x1b[0m");
+    }
 }
