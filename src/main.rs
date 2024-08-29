@@ -1,7 +1,5 @@
 use std::{fs::{self, File}, io::Read, str};
 
-use flag::FIXED_HUFF;
-
 #[derive(Debug)]
 #[allow(dead_code)]
 struct GzipMeta<'a> {
@@ -56,7 +54,6 @@ fn get_len(bs: &mut BitStream, len_code: u16) -> u16 {
 
     // The extra bits should be interpreted as a machine integer
     // stored with the most-significant bit first
-    println!("{len_code}");
     code_table[len_code as usize] + bs.get_nbit(extra_table[len_code as usize])
 }
 
@@ -71,6 +68,91 @@ fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
     ];
 
     code_table[dis_code as usize] + bs.get_nbit(extra_table[dis_code as usize])
+}
+
+#[derive(Debug)]
+struct HuffItem {
+    len: u8,
+    code: u16,
+}
+
+struct HuffCode {
+    v: Vec<HuffItem>,
+}
+
+fn build_huff(bit_length: &[u8]) -> HuffCode {
+    let mut ret = HuffCode{ v: Vec::new() };
+    let mut code = 0;
+    let mut bl_count = Vec::new();
+    for _ in 0..bit_length.len() {
+        bl_count.push(0);
+    }
+
+    for i in bit_length {
+        if *i != 0 {
+            bl_count[*i as usize] += 1;
+        }
+    }
+
+    let mut next_code = [0; 300];
+    for bits in 1..bl_count.len() {
+        code = (code + bl_count[bits-1]) << 1;
+        next_code[bits] = code;
+    }
+
+    println!("{}", bit_length.len());
+    for i in 0..bit_length.len() {
+        if bit_length[i] != 0 {
+            let hi = HuffItem {
+                len: bit_length[i],
+                code: next_code[bit_length[i] as usize],
+            };
+            ret.v.push(hi);
+            next_code[bit_length[i] as usize] += 1;
+        } else {
+            ret.v.push(HuffItem { len: 0, code: 0 });
+        }
+    }
+    ret
+}
+
+fn valid_huff(huff: &[u8]) {
+    let mut check = 0.0;
+    for i in huff {
+        if *i != 0 {
+            check += 1.0 / ((1 << i) as f64);
+        }
+    }
+
+    if check != 1.0 {
+        panic!("Not a valid huff!");
+    }
+    println!("A valid huff!");
+}
+
+fn inflate_dynamic_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
+    let hlit = bs.get_nbit(5);
+    let hdist = bs.get_nbit(5);
+    let hclen = bs.get_nbit(4);
+
+    println!("hlit: {}, hdist: {}, hclen: {}", hlit, hdist, hclen);
+
+    let map = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let mut code_length = [0; 19];
+    for i in 0..(hclen+4) {
+        code_length[map[i as usize]] = bs.get_nbit(3) as u8;
+    }
+    println!("{:?}", code_length);
+
+    valid_huff(&code_length);
+
+    // code length alphabet
+    let cl_hf = build_huff(&code_length[..]);
+    for i in &cl_hf.v {
+        println!("{:?}", i);
+    }
+
+    todo!("inflate_dymamic_huff");
 }
 
 fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
@@ -88,7 +170,7 @@ fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
     */
     loop {
         let mut huff_key = bs.get_nbit_rev(7);
-        println!("a: {huff_key}");
+        // println!("huff_key: {huff_key}");
         if huff_key <= 0b0010111 {
             // 256-279
             if huff_key == 0 {
@@ -158,8 +240,10 @@ fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
         todo!("not final block");
     }
 
-    if btype as u8 == FIXED_HUFF {
+    if btype as u8 == flag::FIXED_HUFF {
         inflate_fixed_huff(&mut bs, &mut v);
+    } else if btype as u8 == flag::DYNAMIC_HUFF {
+        inflate_dynamic_huff(&mut bs, &mut v);
     }
 
     Ok(v)
@@ -285,8 +369,7 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
     println!("meta: {:?}", meta);
 
     let data = inflate(meta.cdata);
-
-    println!("{:?}", data);
+    // println!("{:?}", data);
 
     if let Err(e) = data {
         return Err(e);
@@ -333,14 +416,13 @@ fn main() {
         let _ = File::open(&gz_path).unwrap().read_to_end(&mut gz_content);
 
         let result = ungzip(&gz_content).unwrap();
-        println!("{:?}", result.data);
         // let s = str::from_utf8(&result.data).unwrap();
 
         let raw_path = format!("test_files/{}", arg);
         let mut file_content: Vec<u8> = Vec::new();
         let _ = File::open(&raw_path).unwrap().read_to_end(&mut file_content);
 
-        println!("aa: {:?}, {:?}", file_content, result.data);
+        // println!("aa: {:?}, {:?}", file_content, result.data);
 
         if file_content == result.data {
             println!("\x1b[32m{arg} pass.\x1b[0m");
