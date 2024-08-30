@@ -1,4 +1,4 @@
-use std::{fs::{self, File}, io::Read, str};
+use std::{fs::{self, File}, io::Read, panic, str};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -181,6 +181,58 @@ fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffC
     build_huff(&hf_vec[..])
 }
 
+fn get_dis_code(bs: &mut BitStream, dis_hf: &HuffCode) -> u16 {
+    loop {
+        let mut key = bs.get_bit();
+        let mut len = 1;
+        loop {
+            if let Some(value) = dis_hf.find(key, len) {
+                return value;
+            }
+            key <<= 1;
+            key += bs.get_bit();
+            len += 1;
+        }
+    }
+}
+
+fn decode_dynamic_huff(bs: &mut BitStream, ll_hf: &HuffCode, dis_hf: &HuffCode) -> Vec<u8> {
+    let mut ret = Vec::new();
+    loop {
+        let mut key = bs.get_bit();
+        let mut len = 1;
+        loop {
+            if let Some(value) = ll_hf.find(key, len) {
+                if value < 256 {
+                    ret.push(value as u8);
+                    break;
+
+                } else if value == 256 {
+                    let s = str::from_utf8(&ret).unwrap();
+                    println!("{}", s);
+                    return ret;
+
+                } else {
+                    let len_code = value - 257;
+                    let len = get_len(bs, len_code);
+
+                    let dis_code = get_dis_code(bs, dis_hf);
+                    let dis = get_dis(bs, dis_code);
+
+                    let index = ret.len() - dis as usize;
+                    for i in index..(index + len as usize) {
+                        ret.push(ret[i]);
+                    }
+                    break;
+                }
+            }
+            key <<= 1;
+            key += bs.get_bit();
+            len += 1;
+        }
+    }
+}
+
 fn inflate_dynamic_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
     let hlit = bs.get_nbit(5);
     let hdist = bs.get_nbit(5);
@@ -220,7 +272,7 @@ fn inflate_dynamic_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
         println!("{}, {:?}", i, dis_hf.v[i]);
     }
 
-    todo!("inflate_dymamic_huff");
+    *v = decode_dynamic_huff(bs, &ll_hf, &dis_hf);
 }
 
 fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
