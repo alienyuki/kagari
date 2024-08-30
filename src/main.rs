@@ -80,6 +80,17 @@ struct HuffCode {
     v: Vec<HuffItem>,
 }
 
+impl HuffCode {
+    fn find(&self, key: u16, len: u8) -> Option<u16> {
+        for i in 0..self.v.len() {
+            if self.v[i].code == key && self.v[i].len == len {
+                return Some(i as u16);
+            }
+        }
+        None
+    }
+}
+
 fn build_huff(bit_length: &[u8]) -> HuffCode {
     let mut ret = HuffCode{ v: Vec::new() };
     let mut code = 0;
@@ -130,6 +141,46 @@ fn valid_huff(huff: &[u8]) {
     println!("A valid huff!");
 }
 
+fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffCode {
+    let mut hf_vec = Vec::new();
+    while hf_vec.len() != size as usize {
+        let mut key = bs.get_bit();
+        let mut len = 1;
+        loop {
+            // For even greater compactness, the code length sequences themselves
+            // are compressed using a Huffman code. The alphabet for code lengths
+            // is as follows:
+            if let Some(value) = cl_hf.find(key, len) {
+                if value <= 15 {
+                    hf_vec.push(value as u8);
+                } else if value == 16 {
+                    let last_value = hf_vec[hf_vec.len() - 1];
+                    for _ in 0..(bs.get_nbit(2)+3) {
+                        hf_vec.push(last_value);
+                    }
+                } else if value == 17 {
+                    for _ in 0..(bs.get_nbit(3)+3) {
+                        hf_vec.push(0);
+                    }
+                } else if value == 18 {
+                    for _ in 0..(bs.get_nbit(7)+11) {
+                        hf_vec.push(0);
+                    }
+                }
+                break;
+            }
+            key <<= 1;
+            key += bs.get_bit();
+            len += 1;
+        }
+    }
+
+    println!("llvec: len: {}\n{:?}", hf_vec.len(), hf_vec);
+    valid_huff(&hf_vec);
+
+    build_huff(&hf_vec[..])
+}
+
 fn inflate_dynamic_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
     let hlit = bs.get_nbit(5);
     let hdist = bs.get_nbit(5);
@@ -150,6 +201,23 @@ fn inflate_dynamic_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
     let cl_hf = build_huff(&code_length[..]);
     for i in &cl_hf.v {
         println!("{:?}", i);
+    }
+
+    // generate huff literal tree
+    // literal/length alphabet
+    println!("generate literal/length huffman code:");
+
+    let ll_hf = generate_hf_from_cl(bs, &cl_hf, hlit + 257);
+    for i in 0..ll_hf.v.len() {
+        println!("{}, {:?}", i, ll_hf.v[i]);
+    }
+
+    // generate huff distance tree
+    println!("generate distance huffman code:");
+
+    let dis_hf = generate_hf_from_cl(bs, &cl_hf, hdist + 1);
+    for i in 0..dis_hf.v.len() {
+        println!("{}, {:?}", i, dis_hf.v[i]);
     }
 
     todo!("inflate_dymamic_huff");
