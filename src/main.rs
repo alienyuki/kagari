@@ -144,34 +144,25 @@ fn valid_huff(huff: &[u8]) {
 fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffCode {
     let mut hf_vec = Vec::new();
     while hf_vec.len() != size as usize {
-        let mut key = bs.get_bit();
-        let mut len = 1;
-        loop {
-            // For even greater compactness, the code length sequences themselves
-            // are compressed using a Huffman code. The alphabet for code lengths
-            // is as follows:
-            if let Some(value) = cl_hf.find(key, len) {
-                if value <= 15 {
-                    hf_vec.push(value as u8);
-                } else if value == 16 {
-                    let last_value = hf_vec[hf_vec.len() - 1];
-                    for _ in 0..(bs.get_nbit(2)+3) {
-                        hf_vec.push(last_value);
-                    }
-                } else if value == 17 {
-                    for _ in 0..(bs.get_nbit(3)+3) {
-                        hf_vec.push(0);
-                    }
-                } else if value == 18 {
-                    for _ in 0..(bs.get_nbit(7)+11) {
-                        hf_vec.push(0);
-                    }
-                }
-                break;
+        let value = get_code_from_huff(bs, cl_hf);
+        // For even greater compactness, the code length sequences themselves
+        // are compressed using a Huffman code. The alphabet for code lengths
+        // is as follows:
+        if value <= 15 {
+            hf_vec.push(value as u8);
+        } else if value == 16 {
+            let last_value = hf_vec[hf_vec.len() - 1];
+            for _ in 0..(bs.get_nbit(2)+3) {
+                hf_vec.push(last_value);
             }
-            key <<= 1;
-            key += bs.get_bit();
-            len += 1;
+        } else if value == 17 {
+            for _ in 0..(bs.get_nbit(3)+3) {
+                hf_vec.push(0);
+            }
+        } else if value == 18 {
+            for _ in 0..(bs.get_nbit(7)+11) {
+                hf_vec.push(0);
+            }
         }
     }
 
@@ -179,12 +170,12 @@ fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffC
     build_huff(&hf_vec[..])
 }
 
-fn get_dis_code(bs: &mut BitStream, dis_hf: &HuffCode) -> u16 {
+fn get_code_from_huff(bs: &mut BitStream, hf: &HuffCode) -> u16 {
     loop {
         let mut key = bs.get_bit();
         let mut len = 1;
         loop {
-            if let Some(value) = dis_hf.find(key, len) {
+            if let Some(value) = hf.find(key, len) {
                 return value;
             }
             key <<= 1;
@@ -197,34 +188,22 @@ fn get_dis_code(bs: &mut BitStream, dis_hf: &HuffCode) -> u16 {
 fn decode_dynamic_huff(bs: &mut BitStream, ll_hf: &HuffCode, dis_hf: &HuffCode) -> Vec<u8> {
     let mut ret = Vec::new();
     loop {
-        let mut key = bs.get_bit();
-        let mut len = 1;
-        loop {
-            if let Some(value) = ll_hf.find(key, len) {
-                if value < 256 {
-                    ret.push(value as u8);
-                    break;
+        let value = get_code_from_huff(bs, ll_hf);
+        if value < 256 {
+            ret.push(value as u8);
+        } else if value == 256 {
+            return ret;
+        } else {
+            let len_code = value - 257;
+            let len = get_len(bs, len_code);
 
-                } else if value == 256 {
-                    return ret;
+            let dis_code = get_code_from_huff(bs, dis_hf);
+            let dis = get_dis(bs, dis_code);
 
-                } else {
-                    let len_code = value - 257;
-                    let len = get_len(bs, len_code);
-
-                    let dis_code = get_dis_code(bs, dis_hf);
-                    let dis = get_dis(bs, dis_code);
-
-                    let index = ret.len() - dis as usize;
-                    for i in index..(index + len as usize) {
-                        ret.push(ret[i]);
-                    }
-                    break;
-                }
+            let index = ret.len() - dis as usize;
+            for i in index..(index + len as usize) {
+                ret.push(ret[i]);
             }
-            key <<= 1;
-            key += bs.get_bit();
-            len += 1;
         }
     }
 }
