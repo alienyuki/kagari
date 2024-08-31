@@ -12,6 +12,8 @@ struct GzipMeta<'a> {
     os: u8,
     filename: Option<String>,
     cdata: &'a [u8],
+    crc32: u32,
+    isize: u32,
 }
 
 #[allow(dead_code)]
@@ -466,6 +468,17 @@ fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
 
     if (flg & flag::FCOMMENT) != 0 {}
 
+    let crc32_start = bytes.len() - 8;
+    let crc32 = (bytes[crc32_start] as u32)
+        + ((bytes[crc32_start+1] as u32) << 8)
+        + ((bytes[crc32_start+2] as u32) << 16)
+        + ((bytes[crc32_start+3] as u32) << 24);
+
+    let isize = (bytes[crc32_start+4] as u32)
+        + ((bytes[crc32_start+5] as u32) << 8)
+        + ((bytes[crc32_start+6] as u32) << 16)
+        + ((bytes[crc32_start+7] as u32) << 24);
+
     Ok(GzipMeta {
         id1,
         id2,
@@ -476,7 +489,62 @@ fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
         os,
         filename,
         cdata: &bytes[index..(bytes.len() - 8)],
+        crc32,
+        isize,
     })
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    if bytes.len() == 0 {
+        return 0;
+    }
+
+    let mut v: Vec<u8> = Vec::new();
+    for byte in bytes {
+        for i in 0..8 {
+            if (*byte & (1 << i)) != 0 {
+                v.push(1);
+            } else {
+                v.push(0);
+            }
+        }
+    }
+
+    for _ in 0..32 {
+        v.push(0);
+    }
+
+    for i in 0..32 {
+        v[i] ^= 1;
+    }
+
+    let divisor = vec![1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1];
+
+    let mut vloop: Vec<u8> = Vec::new();
+    for i in 0..divisor.len() {
+        vloop.push(v[i]);
+    }
+
+    for i in 32..v.len() {
+        vloop[32] = v[i];
+
+        if vloop[0] != 0 {
+            for j in 0..divisor.len() {
+                vloop[j] ^= divisor[j];
+            }
+        }
+
+        for j in 0..32 {
+            vloop[j] = vloop[j+1];
+        }
+    }
+
+    let mut ret = 0;
+    for i in 0..32 {
+        ret <<= 1;
+        ret += (vloop[31-i] as u32) ^ 1;
+    }
+    ret
 }
 
 fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
@@ -488,16 +556,21 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
     let meta = res_meta.unwrap();
     println!("meta: {:?}", meta);
 
-    let data = inflate(meta.cdata);
+    let res_data = inflate(meta.cdata);
     // println!("{:?}", data);
 
-    if let Err(e) = data {
+    if let Err(e) = res_data {
         return Err(e);
+    }
+
+    let data = res_data.unwrap();
+    if data.len() != meta.isize as usize || crc32(&data) != meta.crc32 {
+        return Err("check error");
     }
 
     Ok(Gzip {
         meta,
-        data: data.unwrap(),
+        data,
     })
 }
 
