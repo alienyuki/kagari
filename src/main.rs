@@ -1,4 +1,8 @@
-use std::{fs::{self, File}, io::Read, panic, str};
+use std::{
+    fs::{self, File},
+    io::Read,
+    panic, str,
+};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -66,7 +70,8 @@ fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
     ];
 
     let extra_table = [
-        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
+        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12,
+        13, 13,
     ];
 
     code_table[dis_code as usize] + bs.get_nbit(extra_table[dis_code as usize])
@@ -94,7 +99,7 @@ impl HuffCode {
 }
 
 fn build_huff(bit_length: &[u8]) -> HuffCode {
-    let mut ret = HuffCode{ v: Vec::new() };
+    let mut ret = HuffCode { v: Vec::new() };
     let mut code = 0;
     let mut bl_count = Vec::new();
     for _ in 0..bit_length.len() {
@@ -109,7 +114,7 @@ fn build_huff(bit_length: &[u8]) -> HuffCode {
 
     let mut next_code = [0; 300];
     for bits in 1..bl_count.len() {
-        code = (code + bl_count[bits-1]) << 1;
+        code = (code + bl_count[bits - 1]) << 1;
         next_code[bits] = code;
     }
 
@@ -152,15 +157,15 @@ fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffC
             hf_vec.push(value as u8);
         } else if value == 16 {
             let last_value = hf_vec[hf_vec.len() - 1];
-            for _ in 0..(bs.get_nbit(2)+3) {
+            for _ in 0..(bs.get_nbit(2) + 3) {
                 hf_vec.push(last_value);
             }
         } else if value == 17 {
-            for _ in 0..(bs.get_nbit(3)+3) {
+            for _ in 0..(bs.get_nbit(3) + 3) {
                 hf_vec.push(0);
             }
         } else if value == 18 {
-            for _ in 0..(bs.get_nbit(7)+11) {
+            for _ in 0..(bs.get_nbit(7) + 11) {
                 hf_vec.push(0);
             }
         }
@@ -213,9 +218,11 @@ fn inflate_dynamic_huff(bs: &mut BitStream) -> Vec<u8> {
     let hdist = bs.get_nbit(5);
     let hclen = bs.get_nbit(4);
 
-    let map = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let map = [
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+    ];
     let mut code_length = [0; 19];
-    for i in 0..(hclen+4) {
+    for i in 0..(hclen + 4) {
         code_length[map[i as usize]] = bs.get_nbit(3) as u8;
     }
 
@@ -277,7 +284,6 @@ fn inflate_fixed_huff(bs: &mut BitStream) -> Vec<u8> {
             let p = (huff_key - 0b00110000 as u16) as u8;
             v.push(p);
             continue;
-
         } else if huff_key <= 0b11000111 {
             // 280-287, the same as 256-279
             let len_code = huff_key - 0b11000000 + 279 - 256;
@@ -419,14 +425,14 @@ fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
 
     let crc32_start = bytes.len() - 8;
     let crc32 = (bytes[crc32_start] as u32)
-        + ((bytes[crc32_start+1] as u32) << 8)
-        + ((bytes[crc32_start+2] as u32) << 16)
-        + ((bytes[crc32_start+3] as u32) << 24);
+        + ((bytes[crc32_start + 1] as u32) << 8)
+        + ((bytes[crc32_start + 2] as u32) << 16)
+        + ((bytes[crc32_start + 3] as u32) << 24);
 
-    let isize = (bytes[crc32_start+4] as u32)
-        + ((bytes[crc32_start+5] as u32) << 8)
-        + ((bytes[crc32_start+6] as u32) << 16)
-        + ((bytes[crc32_start+7] as u32) << 24);
+    let isize = (bytes[crc32_start + 4] as u32)
+        + ((bytes[crc32_start + 5] as u32) << 8)
+        + ((bytes[crc32_start + 6] as u32) << 16)
+        + ((bytes[crc32_start + 7] as u32) << 24);
 
     Ok(GzipMeta {
         id1,
@@ -467,7 +473,10 @@ fn crc32(bytes: &[u8]) -> u32 {
         v[i] ^= 1;
     }
 
-    let divisor = vec![1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1];
+    let divisor = vec![
+        1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0,
+        1, 1, 1,
+    ];
 
     let mut vloop: Vec<u8> = Vec::new();
     for i in 0..divisor.len() {
@@ -484,14 +493,14 @@ fn crc32(bytes: &[u8]) -> u32 {
         }
 
         for j in 0..32 {
-            vloop[j] = vloop[j+1];
+            vloop[j] = vloop[j + 1];
         }
     }
 
     let mut ret = 0;
     for i in 0..32 {
         ret <<= 1;
-        ret += (vloop[31-i] as u32) ^ 1;
+        ret += (vloop[31 - i] as u32) ^ 1;
     }
     ret
 }
@@ -514,10 +523,7 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
         return Err("check error");
     }
 
-    Ok(Gzip {
-        meta,
-        data,
-    })
+    Ok(Gzip { meta, data })
 }
 
 fn generate_cases() -> Vec<String> {
@@ -557,7 +563,9 @@ fn main() {
 
         let raw_path = format!("test_files/{}", arg);
         let mut file_content: Vec<u8> = Vec::new();
-        let _ = File::open(&raw_path).unwrap().read_to_end(&mut file_content);
+        let _ = File::open(&raw_path)
+            .unwrap()
+            .read_to_end(&mut file_content);
 
         // println!("aa: {:?}, {:?}", file_content, result.data);
 
