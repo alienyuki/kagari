@@ -113,7 +113,6 @@ fn build_huff(bit_length: &[u8]) -> HuffCode {
         next_code[bits] = code;
     }
 
-    println!("{}", bit_length.len());
     for i in 0..bit_length.len() {
         if bit_length[i] != 0 {
             let hi = HuffItem {
@@ -140,7 +139,6 @@ fn valid_huff(huff: &[u8]) {
     if check != 1.0 {
         panic!("Not a valid huff!");
     }
-    println!("A valid huff!");
 }
 
 fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffCode {
@@ -177,9 +175,7 @@ fn generate_hf_from_cl(bs: &mut BitStream, cl_hf: &HuffCode, size: u16) -> HuffC
         }
     }
 
-    println!("llvec: len: {}\n{:?}", hf_vec.len(), hf_vec);
     valid_huff(&hf_vec);
-
     build_huff(&hf_vec[..])
 }
 
@@ -210,8 +206,6 @@ fn decode_dynamic_huff(bs: &mut BitStream, ll_hf: &HuffCode, dis_hf: &HuffCode) 
                     break;
 
                 } else if value == 256 {
-                    let s = str::from_utf8(&ret).unwrap();
-                    println!("{}", s);
                     return ret;
 
                 } else {
@@ -235,49 +229,30 @@ fn decode_dynamic_huff(bs: &mut BitStream, ll_hf: &HuffCode, dis_hf: &HuffCode) 
     }
 }
 
-fn inflate_dynamic_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
+fn inflate_dynamic_huff(bs: &mut BitStream) -> Vec<u8> {
     let hlit = bs.get_nbit(5);
     let hdist = bs.get_nbit(5);
     let hclen = bs.get_nbit(4);
-
-    println!("hlit: {}, hdist: {}, hclen: {}", hlit, hdist, hclen);
 
     let map = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
     let mut code_length = [0; 19];
     for i in 0..(hclen+4) {
         code_length[map[i as usize]] = bs.get_nbit(3) as u8;
     }
-    println!("{:?}", code_length);
 
     valid_huff(&code_length);
 
     // code length alphabet
     let cl_hf = build_huff(&code_length[..]);
-    for i in &cl_hf.v {
-        println!("{:?}", i);
-    }
-
-    // generate huff literal tree
-    // literal/length alphabet
-    println!("generate literal/length huffman code:");
-
+    // generate huff literal/length tree
     let ll_hf = generate_hf_from_cl(bs, &cl_hf, hlit + 257);
-    for i in 0..ll_hf.v.len() {
-        println!("{}, {:?}", i, ll_hf.v[i]);
-    }
-
     // generate huff distance tree
-    println!("generate distance huffman code:");
-
     let dis_hf = generate_hf_from_cl(bs, &cl_hf, hdist + 1);
-    for i in 0..dis_hf.v.len() {
-        println!("{}, {:?}", i, dis_hf.v[i]);
-    }
 
-    *v = decode_dynamic_huff(bs, &ll_hf, &dis_hf);
+    decode_dynamic_huff(bs, &ll_hf, &dis_hf)
 }
 
-fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
+fn inflate_fixed_huff(bs: &mut BitStream) -> Vec<u8> {
     /*
         Lit Value   Bits    Codes
         ---------   ----    -----
@@ -290,6 +265,7 @@ fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
         280 - 287     8     11000000 through
                             11000111
     */
+    let mut v = Vec::new();
     loop {
         let mut huff_key = bs.get_nbit_rev(7);
         // println!("huff_key: {huff_key}");
@@ -326,7 +302,6 @@ fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
         } else if huff_key <= 0b11000111 {
             // 280-287, the same as 256-279
             let len_code = huff_key - 0b11000000 + 279 - 256;
-            println!("len code: {}, a: {}\n", len_code, huff_key);
             let len = get_len(bs, len_code);
 
             // Distance codes 0-31 are represented by (fixed-length) 5-bit codes
@@ -348,11 +323,11 @@ fn inflate_fixed_huff(bs: &mut BitStream, v: &mut Vec<u8>) {
         let p = (huff_key - 0b110010000 as u16) as u8;
         v.push(p);
     }
+    v
 }
 
 #[allow(dead_code)]
 fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
-    let mut v = Vec::new();
     let mut bs = BitStream::new(bytes);
 
     let bfinal = bs.get_nbit(1);
@@ -363,12 +338,12 @@ fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
     }
 
     if btype as u8 == flag::FIXED_HUFF {
-        inflate_fixed_huff(&mut bs, &mut v);
+        return Ok(inflate_fixed_huff(&mut bs));
     } else if btype as u8 == flag::DYNAMIC_HUFF {
-        inflate_dynamic_huff(&mut bs, &mut v);
+        return Ok(inflate_dynamic_huff(&mut bs));
     }
 
-    Ok(v)
+    Err("Invalid type")
 }
 
 struct BitStream<'a> {
@@ -429,11 +404,6 @@ fn parse_gzip_meta(bytes: &[u8]) -> Result<GzipMeta, &str> {
     if bytes.len() < 10 {
         return Err("size should greater than 10");
     }
-
-    for byte in bytes {
-        print!("0x{:02x} ", byte);
-    }
-    println!("");
 
     if bytes[0] != 0x1f || bytes[1] != 0x8b || bytes[2] != 0x08 {
         return Err("magic number");
@@ -554,10 +524,7 @@ fn ungzip(bytes: &[u8]) -> Result<Gzip, &str> {
     }
 
     let meta = res_meta.unwrap();
-    println!("meta: {:?}", meta);
-
     let res_data = inflate(meta.cdata);
-    // println!("{:?}", data);
 
     if let Err(e) = res_data {
         return Err(e);
@@ -602,8 +569,6 @@ fn main() {
     }
 
     for arg in cases {
-        println!("{arg}");
-
         let gz_path = format!("test_files/{}.gz", arg);
         let mut gz_content: Vec<u8> = Vec::new();
         let _ = File::open(&gz_path).unwrap().read_to_end(&mut gz_content);
