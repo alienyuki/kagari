@@ -1,5 +1,8 @@
 use std::{
+    collections::HashMap,
     fs::{self, File},
+    hash::Hash,
+    hash::Hasher,
     io::Read,
     panic, str,
 };
@@ -80,26 +83,43 @@ fn get_dis(bs: &mut BitStream, dis_code: u16) -> u16 {
 #[derive(Debug)]
 struct HuffItem {
     len: u8,
-    code: u16,
+    key: u16,
 }
 
 struct HuffCode {
-    v: Vec<HuffItem>,
+    hm: HashMap<HuffItem, u16>,
 }
+
+impl Hash for HuffItem {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.len.hash(state);
+        self.key.hash(state);
+    }
+}
+
+impl PartialEq for HuffItem {
+    fn eq(&self, rhs: &HuffItem) -> bool {
+        if rhs.len == self.len && rhs.key == self.key {
+            return true;
+        }
+        false
+    }
+}
+
+impl Eq for HuffItem {}
 
 impl HuffCode {
     fn find(&self, key: u16, len: u8) -> Option<u16> {
-        for i in 0..self.v.len() {
-            if self.v[i].code == key && self.v[i].len == len {
-                return Some(i as u16);
-            }
+        let huff_k = HuffItem { len, key };
+        if let Some(code) = self.hm.get(&huff_k) {
+            return Some(*code);
         }
         None
     }
 }
 
 fn build_huff(bit_length: &[u8]) -> HuffCode {
-    let mut ret = HuffCode { v: Vec::new() };
+    let mut ret = HuffCode { hm: HashMap::new() };
     let mut code = 0;
     let mut bl_count = Vec::new();
     for _ in 0..bit_length.len() {
@@ -122,12 +142,10 @@ fn build_huff(bit_length: &[u8]) -> HuffCode {
         if bit_length[i] != 0 {
             let hi = HuffItem {
                 len: bit_length[i],
-                code: next_code[bit_length[i] as usize],
+                key: next_code[bit_length[i] as usize],
             };
-            ret.v.push(hi);
+            ret.hm.insert(hi, i as u16);
             next_code[bit_length[i] as usize] += 1;
-        } else {
-            ret.v.push(HuffItem { len: 0, code: 0 });
         }
     }
     ret
