@@ -332,21 +332,33 @@ fn inflate_fixed_huff(bs: &mut BitStream) -> Vec<u8> {
 #[allow(dead_code)]
 fn inflate(bytes: &[u8]) -> Result<Vec<u8>, &str> {
     let mut bs = BitStream::new(bytes);
+    let mut ret = Vec::new();
 
-    let bfinal = bs.get_nbit(1);
-    let btype = bs.get_nbit(2);
+    loop {
+        let bfinal = bs.get_nbit(1);
+        let btype = bs.get_nbit(2);
 
-    if bfinal != 1 {
-        todo!("not final block");
+        if btype as u8 == flag::FIXED_HUFF {
+            ret.append(&mut inflate_fixed_huff(&mut bs));
+        } else if btype as u8 == flag::DYNAMIC_HUFF {
+            ret.append(&mut inflate_dynamic_huff(&mut bs));
+        } else if btype as u8 == flag::NO_COMPRESSION {
+            bs.clear_bits();
+            let len = (bs.get_nbit(8)) + (bs.get_nbit(8) << 8);
+            let nlen = (bs.get_nbit(8)) + (bs.get_nbit(8) << 8);
+
+            if len + nlen != 65535 {
+                println!("{len} {nlen}");
+                panic!("nlen should be one's complement of len.");
+            }
+            let mut v = bs.get_nbytes(len as usize);
+            ret.append(&mut v);
+        }
+
+        if bfinal == 1 {
+            return Ok(ret);
+        }
     }
-
-    if btype as u8 == flag::FIXED_HUFF {
-        return Ok(inflate_fixed_huff(&mut bs));
-    } else if btype as u8 == flag::DYNAMIC_HUFF {
-        return Ok(inflate_dynamic_huff(&mut bs));
-    }
-
-    Err("Invalid type")
 }
 
 struct BitStream<'a> {
@@ -400,6 +412,21 @@ impl<'a> BitStream<'a> {
         }
 
         n
+    }
+
+    fn clear_bits(&mut self) {
+        while self.mask != 1 {
+            self.get_bit();
+        }
+    }
+
+    fn get_nbytes(&mut self, len: usize) -> Vec<u8> {
+        let mut v = Vec::new();
+        for i in 0..len {
+            v.push(self.bytes[i + self.index]);
+        }
+        self.index += len;
+        v
     }
 }
 
